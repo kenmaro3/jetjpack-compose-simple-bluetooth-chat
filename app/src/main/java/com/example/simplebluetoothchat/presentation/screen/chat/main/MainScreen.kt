@@ -1,0 +1,374 @@
+package com.example.simplebluetoothchat.presentation.screen.chat.main
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.Button
+import androidx.compose.material.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.simplebluetoothchat.business.constants.core.BluetoothConnectionState
+import com.example.simplebluetoothchat.business.constants.core.ProgressBarState
+import com.example.simplebluetoothchat.business.domain.DeviceData
+import com.example.simplebluetoothchat.business.util.BluetoothTools.getPairedDevices
+import com.example.simplebluetoothchat.presentation.MainActivity
+import com.example.simplebluetoothchat.presentation.bluetooth_manager.BluetoothManagerEvent
+import com.example.simplebluetoothchat.presentation.bluetooth_manager.ChatBluetoothManager
+import com.example.simplebluetoothchat.presentation.getActivity
+import com.example.simplebluetoothchat.presentation.screen.chat.main.component.DeviceListItem
+import com.example.simplebluetoothchat.presentation.screen.chat.main.state.MainEvents
+import com.example.simplebluetoothchat.presentation.screen.chat.main.state.MainState
+import com.example.simplebluetoothchat.presentation.ui.component.CustomSpacer
+import com.example.simplebluetoothchat.presentation.ui.component.DefaultScreenUI
+import com.example.simplebluetoothchat.presentation.ui.theme.blue_400
+import com.example.simplebluetoothchat.presentation.ui.theme.green_400
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
+
+
+private val TAG = "AppDebug MainScreen"
+
+@SuppressLint("MissingPermission")
+@OptIn(ExperimentalPermissionsApi::class)
+@ExperimentalComposeUiApi
+@ExperimentalAnimationApi
+@Composable
+fun MainScreen(
+    state: MainState,
+    events: (MainEvents) -> Unit,
+    navigateToChatScreen: () -> Unit,
+    chatBluetoothManager: ChatBluetoothManager,
+) {
+
+
+    DefaultScreenUI(
+        isLoading = checkIsLoading(
+            state.progressBarState,
+            chatBluetoothManager.state.progressBarState
+        ),
+        queue = chatBluetoothManager.state.errorQueue,
+        onRemoveHeadFromQueue = {
+            chatBluetoothManager.onTriggerEvent(BluetoothManagerEvent.OnRemoveHeadFromQueue)
+        }
+    ) {
+
+        // TODO(Show user bluetooth is on or off)
+
+        val activity = LocalContext.current.getActivity<MainActivity>()
+        activity?.apply {
+            registerBroadCast(activity = this, events = events)
+        }
+
+
+        InitLauncherForActivityResult(
+            events = events,
+            bluetoothAdapter = chatBluetoothManager.bluetoothAdapter
+        )
+
+        // Camera permission state
+        val cameraPermissionState = rememberMultiplePermissionsState(
+            listOf(
+                android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+            )
+        )
+
+
+        if (state.shouldBluetoothStartScan) {
+            if (!cameraPermissionState.allPermissionsGranted) {
+                SideEffect {
+                    cameraPermissionState.launchMultiplePermissionRequest()
+                }
+            } else {
+                startDiscovery(chatBluetoothManager.bluetoothAdapter)
+            }
+        }
+
+        if (state.shouldMakeDeviceVisible) {
+            events(MainEvents.UpdateShouldMakeDeviceVisible(false))
+            val discoverableIntent = Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
+            discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300)
+            activity?.startActivity(discoverableIntent)
+        }
+
+
+        if (chatBluetoothManager.state.bluetoothConnectionState == BluetoothConnectionState.Connected) {
+            navigateToChatScreen()
+        }
+
+
+        StatelessMainScreen(
+            state = state,
+            events = events,
+            chatBluetoothManager = chatBluetoothManager
+        )
+
+    }
+
+}
+
+@Composable
+fun StatelessMainScreen(
+    state: MainState,
+    events: (MainEvents) -> Unit,
+    chatBluetoothManager: ChatBluetoothManager,
+) {
+    Box {
+        Column() {
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Button(onClick = {
+                    events(MainEvents.UpdateProgressBarState(ProgressBarState.Loading))
+                    events(MainEvents.UpdateShouldBluetoothStartScan(true))
+
+                }) {
+                    Text("Search Devices", style = TextStyle(fontWeight = FontWeight.Bold))
+                }
+
+                CustomSpacer(size = 8)
+
+                Button(onClick = {
+                    events(MainEvents.UpdateShouldMakeDeviceVisible(true))
+                }) {
+                    Text("Make Visible", style = TextStyle(fontWeight = FontWeight.Bold))
+                }
+            }
+
+            AnimatedVisibility(
+                visible =
+                state.pairedDevices.isNotEmpty() ||
+                        state.searchedDevices.isNotEmpty()
+            ) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().padding(4.dp),
+                ) {
+
+                    item {
+                        AnimatedVisibility(
+                            visible =
+                            state.pairedDevices.isNotEmpty()
+                        ) {
+                            Text(
+                                text = "Paired Devices:",
+                                style = TextStyle(
+                                    color = green_400,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    items(state.pairedDevices) { device ->
+                        DeviceListItem(
+                            device = device,
+                            onSelect = {
+                                if (!checkIsLoading(
+                                        state.progressBarState,
+                                        chatBluetoothManager.state.progressBarState
+                                    )
+                                ) {
+                                    connectDevice(
+                                        device,
+                                        chatBluetoothManager.bluetoothAdapter
+                                    ) { device, secure ->
+                                        chatBluetoothManager.onTriggerEvent(
+                                            BluetoothManagerEvent.ConnectToOtherDevice(
+                                                device,
+                                                secure
+                                            )
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    }
+
+
+                    item {
+
+                        AnimatedVisibility(
+                            visible =
+                            state.searchedDevices.isNotEmpty()
+                        ) {
+
+                            Text(
+                                text = "Searched Devices:",
+                                style = TextStyle(
+                                    color = blue_400,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
+                    }
+
+                    items(state.searchedDevices) { device ->
+                        DeviceListItem(
+                            device = device,
+                            onSelect = {
+                                if (!checkIsLoading(
+                                        state.progressBarState,
+                                        chatBluetoothManager.state.progressBarState
+                                    )
+                                ) {
+                                    connectDevice(
+                                        device,
+                                        chatBluetoothManager.bluetoothAdapter
+                                    ) { device, secure ->
+                                        chatBluetoothManager.onTriggerEvent(
+                                            BluetoothManagerEvent.ConnectToOtherDevice(
+                                                device,
+                                                secure
+                                            )
+                                        )
+                                    }
+                                }
+                            },
+                        )
+                    }
+
+
+                }
+            }
+
+
+        }
+    }
+}
+
+fun checkIsLoading(
+    progressBarState01: ProgressBarState,
+    progressBarState02: ProgressBarState,
+): Boolean {
+    return progressBarState01 == ProgressBarState.Loading || progressBarState02 == ProgressBarState.Loading
+}
+
+
+@SuppressLint("MissingPermission")
+private fun connectDevice(
+    deviceData: DeviceData,
+    bluetoothAdapter: BluetoothAdapter,
+    connectCallback: (BluetoothDevice, Boolean) -> Unit
+) {
+
+
+    // Cancel discovery because it's costly and we're about to connect
+    bluetoothAdapter.cancelDiscovery()
+    val deviceAddress = deviceData.deviceHardwareAddress
+
+    val device = bluetoothAdapter.getRemoteDevice(deviceAddress)
+
+    // Attempt to connect to the device
+    connectCallback(device, true)
+}
+
+
+@Composable
+private fun InitLauncherForActivityResult(
+    events: (MainEvents) -> Unit,
+    bluetoothAdapter: BluetoothAdapter
+) {
+    val resultLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) { // There are no request codes anymore
+                events(MainEvents.UpdatePairedDevice(getPairedDevices(bluetoothAdapter = bluetoothAdapter)))
+                events(MainEvents.UpdateIsBluetoothOn(true))
+            } else {
+                events(MainEvents.UpdateIsBluetoothOn(false))
+            }
+        }
+
+    if (!bluetoothAdapter.isEnabled) {
+        val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+        SideEffect {
+            resultLauncher.launch(enableBtIntent)
+        }
+    } else {
+        events(MainEvents.UpdateIsBluetoothOn(true))
+        events(MainEvents.UpdatePairedDevice(getPairedDevices(bluetoothAdapter = bluetoothAdapter)))
+    }
+
+}
+
+
+private fun registerBroadCast(activity: Activity, events: (MainEvents) -> Unit) {
+    // Register for broadcasts when a device is discovered.
+    var filter = IntentFilter(BluetoothDevice.ACTION_FOUND)
+    activity.registerReceiver(startBluetoothReceiver(events = events), filter)
+
+    // Register for broadcasts when discovery has finished
+    filter = IntentFilter(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+    activity.registerReceiver(startBluetoothReceiver(events = events), filter)
+}
+
+@SuppressLint("MissingPermission")
+private fun startDiscovery(adapter: BluetoothAdapter) {
+    // If we're already discovering, stop it
+    if (adapter.isDiscovering)
+        adapter.cancelDiscovery()
+
+    // Request discover from BluetoothAdapter
+    adapter.startDiscovery()
+}
+
+private fun startBluetoothReceiver(events: (MainEvents) -> Unit): BroadcastReceiver {
+
+    return object : BroadcastReceiver() {
+
+        @SuppressLint("MissingPermission")
+        override fun onReceive(context: Context, intent: Intent) {
+
+            events(MainEvents.UpdateShouldBluetoothStartScan(false))
+
+            val action = intent.action
+
+            val devicesList = arrayListOf<DeviceData>()
+
+            if (BluetoothDevice.ACTION_FOUND == action) {
+                val device =
+                    intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                val deviceName = device?.name
+                val deviceHardwareAddress = device?.address // MAC address
+
+                if (!deviceName.isNullOrEmpty() && !deviceHardwareAddress.isNullOrEmpty()) {
+                    val deviceData = DeviceData(deviceName, deviceHardwareAddress)
+                    devicesList.add(deviceData)
+                }
+                events(MainEvents.UpdateSearchedDevice(devicesList)) // TODO(needs to check)
+
+            }
+
+            if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED == action) {
+                Log.i(TAG, "onReceive ACTION_DISCOVERY_FINISHED: ")
+                events(MainEvents.UpdateProgressBarState(ProgressBarState.Idle))
+                // TODO(Show user bluetooth has been searched)
+            }
+        }
+    }
+}

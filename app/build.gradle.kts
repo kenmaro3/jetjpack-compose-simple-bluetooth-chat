@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
     id ("dagger.hilt.android.plugin")
+    id("kotlin-android")
 }
 
 android {
@@ -69,9 +70,28 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 
+    // material
+    implementation("androidx.compose.material:material:1.4.2")
+    implementation("androidx.compose.material:material-icons-extended:1.3.1")
+
     // Dagger - Hilt
     implementation("com.google.dagger:hilt-android:2.44")
     kapt("com.google.dagger:hilt-android-compiler:2.44")
-    kapt("androidx.hilt:hilt-compiler:1.0.0")
-    implementation("androidx.hilt:hilt-navigation-compose:1.0.0")
+    kapt("androidx.hilt:hilt-compiler:1.1.0")
+    implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
+
+    // accompanist
+    implementation("com.google.accompanist:accompanist-appcompat-theme:0.28.0")
+    implementation("com.google.accompanist:accompanist-permissions:0.32.0")
+    implementation("com.google.accompanist:accompanist-navigation-animation:0.32.0")
+
+    // material3
+    implementation("androidx.compose.material3:material3:1.1.1")
+    implementation("androidx.compose.material3:material3-window-size-class:1.1.1")
+
+    // navigation
+    implementation("androidx.navigation:navigation-compose:2.5.3")
+
+    // multidex
+    implementation("androidx.multidex:multidex:2.0.1")
 }

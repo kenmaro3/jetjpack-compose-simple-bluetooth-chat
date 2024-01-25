@@ -1,0 +1,196 @@
+package com.example.simplebluetoothchat.presentation.screen.chat
+
+import android.annotation.SuppressLint
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.simplebluetoothchat.business.constants.core.BluetoothConnectionState
+import com.example.simplebluetoothchat.business.util.MessageTools.sortMessagesByCount
+import com.example.simplebluetoothchat.presentation.bluetooth_manager.BluetoothManagerEvent
+import com.example.simplebluetoothchat.presentation.bluetooth_manager.ChatBluetoothManager
+import com.example.simplebluetoothchat.presentation.screen.chat.component.Messages
+import com.example.simplebluetoothchat.presentation.screen.chat.state.ChatEvents
+import com.example.simplebluetoothchat.presentation.screen.chat.state.ChatState
+import com.example.simplebluetoothchat.presentation.screen.chat.main.checkIsLoading
+import com.example.simplebluetoothchat.presentation.ui.component.DefaultScreenUI
+import com.example.simplebluetoothchat.presentation.ui.theme.TextFieldTheme
+import com.example.simplebluetoothchat.presentation.ui.theme.grey_200
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+
+
+private val TAG = "AppDebug MainScreen"
+
+@SuppressLint("MissingPermission")
+@OptIn(
+    ExperimentalPermissionsApi::class,
+    androidx.compose.foundation.ExperimentalFoundationApi::class
+)
+@ExperimentalComposeUiApi
+@ExperimentalAnimationApi
+@Composable
+fun ChatScreen(
+    state: ChatState,
+    events: (ChatEvents) -> Unit,
+    chatBluetoothManager: ChatBluetoothManager,
+    popBackStack: () -> Unit
+) {
+    DefaultScreenUI(
+        isLoading = checkIsLoading(
+            state.progressBarState,
+            chatBluetoothManager.state.progressBarState
+        ),
+        queue = chatBluetoothManager.state.errorQueue,
+        onRemoveHeadFromQueue = {
+            chatBluetoothManager.onTriggerEvent(BluetoothManagerEvent.OnRemoveHeadFromQueue)
+        }
+    ) {
+
+        if (chatBluetoothManager.state.bluetoothConnectionState != BluetoothConnectionState.Connected &&
+            chatBluetoothManager.state.errorQueue.isEmpty()
+        ) {
+            popBackStack()
+        }
+
+
+        BackHandler {
+            chatBluetoothManager.state.activeBluetoothSocket?.let { bluetoothSocket ->
+                chatBluetoothManager.onTriggerEvent(
+                    BluetoothManagerEvent.CloseTransferring(
+                        bluetoothSocket
+                    )
+                )
+            }
+        }
+
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+            ) {
+
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(55.dp)
+                        .background(MaterialTheme.colors.primary),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = {
+                        chatBluetoothManager.state.activeBluetoothSocket?.let { bluetoothSocket ->
+                            chatBluetoothManager.onTriggerEvent(
+                                BluetoothManagerEvent.CloseTransferring(
+                                    bluetoothSocket
+                                )
+                            )
+                        }
+
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = null,
+                            tint = grey_200
+                        )
+                    }
+                }
+
+
+
+                Messages(
+                    messages = chatBluetoothManager.state.messagesList.sortMessagesByCount(),
+                    modifier = Modifier.weight(1f),
+                )
+
+                UserInputText(
+                    state = state,
+                    events = events,
+                    chatBluetoothManager = chatBluetoothManager
+                )
+
+            }
+        }
+
+
+    }
+
+}
+
+
+@OptIn(ExperimentalMaterialApi::class)
+@ExperimentalFoundationApi
+@Composable
+private fun UserInputText(
+    chatBluetoothManager: ChatBluetoothManager,
+    state: ChatState,
+    events: (ChatEvents) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp),
+    ) {
+
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            TextField(
+                modifier = Modifier.fillMaxWidth(.80f),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Text,
+                    imeAction = ImeAction.Send,
+                ),
+                value = state.chatInput,
+                onValueChange = {
+                    events(ChatEvents.UpdateInputChat(it))
+                },
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true,
+                label = { Text("Message here...", color = grey_200) },
+                colors = TextFieldTheme(),
+            )
+
+            Button(onClick = {
+                if (state.chatInput.isNotEmpty()) {
+                    chatBluetoothManager.onTriggerEvent(
+                        BluetoothManagerEvent.WriteFromTransferring(
+                            state.chatInput.toByteArray()
+                        )
+                    )
+                }
+            }) {
+                Text(
+                    text = "SEND",
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                )
+            }
+
+        }
+
+    }
+}
+
+
